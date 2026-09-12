@@ -1,7 +1,9 @@
 name: Build keeper board
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # lets you rebuild on demand from the Actions tab
+  schedule:
+    - cron: '0 11 * * *'    # every day at 11:00 UTC (~6am ET)
   push:
     branches: [main]
 
@@ -19,11 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.12
-      - run: pip install requests
-      - run: python build_site.py
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Build the board
+        env:
+          # Optional: set a LEAGUE_ID repo secret to keep the id out of the repo.
+          # If unset, build_site.py falls back to league.json.
+          LEAGUE_ID: ${{ secrets.LEAGUE_ID }}
+          CURRENT_LEAGUE_ID: ${{ secrets.CURRENT_LEAGUE_ID }}
+        run: python build_site.py
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
