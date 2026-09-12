@@ -1,0 +1,11 @@
+{
+  "league_id": "1312035100451442688",
+
+  "_note": [
+    "One league id is enough. The build works out the rest: keeper prices come",
+    "from last season's draft (found via the league's previous_league_id), and",
+    "punishments, awards and trades come from the season being played.",
+    "",
+    "Only set current_league_id if you want to override that automatic choice."
+  ]
+}

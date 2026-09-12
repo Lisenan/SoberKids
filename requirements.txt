@@ -1,0 +1,4 @@
+requests
+# optional, only needed for the Excel/CSV report:
+# pandas
+# openpyxl

@@ -1,0 +1,49 @@
+{
+  "_readme": [
+    "Manually logged punishments. Sleeper knows who EARNED a punishment, but it",
+    "has no idea whether anyone actually served it -- so that part lives here.",
+    "Edit this file (on github.com directly is fine), commit, and the next build",
+    "picks it up.",
+    "",
+    "Match a team with either 'manager' (Sleeper username, most reliable) or",
+    "'team' (team name). Manager wins if both are present.",
+    "",
+    "status: 'done' or 'pending'.",
+    "count:  how many offenses this entry settles. Defaults to 1. Use it when",
+    "        one punishment clears several zeros at once.",
+    "proof:  optional link -- photo, video, whatever the group chat demanded."
+  ],
+
+  "rule": "Every zero, negative, or empty slot is one punishment. Serve it or it carries.",
+
+  "log": [
+    {
+      "manager": "nickl",
+      "week": 3,
+      "punishment": "Waffle House hour",
+      "status": "done",
+      "date": "2025-10-14",
+      "count": 2,
+      "note": "Served both. Two hours, no hashbrowns left.",
+      "proof": ""
+    },
+    {
+      "manager": "chris_p",
+      "week": 1,
+      "punishment": "Team name changed to Zero Chill for a month",
+      "status": "done",
+      "date": "2025-09-20",
+      "count": 1,
+      "note": ""
+    },
+    {
+      "manager": "samf",
+      "week": 1,
+      "punishment": "Buys the draft night wings",
+      "status": "pending",
+      "date": "",
+      "count": 1,
+      "note": "Claims he is good for it."
+    }
+  ]
+}
