@@ -117,42 +117,79 @@ def resolve_ids(league_id):
     return league_id, league_id
 
 
-def build_payload(league_id, current_league_id=None):
-    league = core.get(f"{core.BASE}/league/{league_id}")
-    if not league:
-        sys.exit(f"League {league_id} not found.")
-    rows, total_rounds = core.build_rows(league_id)
-    if not rows:
-        sys.exit("No roster data returned -- check the league id.")
+def league_chain(league_id, limit=6):
+    """
+    Walk previous_league_id back through past seasons.
 
+    Returns oldest-first list of league objects, so the Keepers tab can offer a
+    board for every season the league has existed.
+    """
+    chain, seen = [], set()
+    lid = league_id
+    while lid and lid not in seen and len(chain) < limit:
+        seen.add(lid)
+        lg = core.get(f"{core.BASE}/league/{lid}")
+        if not lg:
+            break
+        chain.append(lg)
+        lid = lg.get("previous_league_id")
+    chain.reverse()
+    return chain
+
+
+def keeper_board(league):
+    """Keeper prices for the season AFTER this league's season."""
+    lid = league["league_id"]
+    rows, total_rounds = core.build_rows(lid)
+    if not rows:
+        return None
     season = league.get("season")
     try:
         keeper_season = str(int(season) + 1)
     except (TypeError, ValueError):
         keeper_season = ""
 
-    # Group by manager, preserving the per-team sort (cheapest pick first).
     rows = sorted(rows, key=core.sort_key)
     teams = {}
     for r in rows:
         key = r["manager"] or "(no owner)"
-        t = teams.setdefault(key, {
-            "manager": key,
-            "team": r["team_name"] or key,
-            "players": [],
-        })
+        t = teams.setdefault(key, {"manager": key,
+                                   "team": r["team_name"] or key, "players": []})
         t["players"].append({
-            "name": r["player"],
-            "pos": r["position"] or "",
-            "nfl": r["nfl_team"] or "",
-            "keep": r["keeper_round"],
-            "prev": r["prior_round"],
-            "penalty": r["penalty_rounds"],
+            "name": r["player"], "pos": r["position"] or "",
+            "nfl": r["nfl_team"] or "", "keep": r["keeper_round"],
+            "prev": r["prior_round"], "penalty": r["penalty_rounds"],
             "kept": r["kept_last_year"] == "YES",
             "waiver": r["drafted_round"] is None,
             "from": r["originally_drafted_by"] if r["traded_in"] else "",
             "basis": r["cost_basis"],
         })
+    return {
+        "season": season, "keeper_season": keeper_season,
+        "rounds": total_rounds,
+        "waiver_round": max(1, total_rounds - 2) if total_rounds else None,
+        "teams": sorted(teams.values(), key=lambda t: t["team"].lower()),
+    }
+
+
+def build_payload(league_id, current_league_id=None):
+    league = core.get(f"{core.BASE}/league/{league_id}")
+    if not league:
+        sys.exit(f"League {league_id} not found.")
+
+    # One board per season the league has existed, newest last.
+    boards = []
+    for lg in league_chain(league_id):
+        b = keeper_board(lg)
+        if b:
+            boards.append(b)
+    if not boards:
+        sys.exit("No roster data returned -- check the league id.")
+    latest = boards[-1]
+    boards.reverse()          # newest first for the season picker
+
+    season = latest["season"]
+    keeper_season = latest["keeper_season"]
 
     # ---- Weekly data: zeros + awards (current season) ---------------------
     wk_data = {"weeks": [], "offenses": [], "scoring": [],
@@ -178,10 +215,11 @@ def build_payload(league_id, current_league_id=None):
         "league": league.get("name") or "Keeper Board",
         "season": season,
         "keeper_season": keeper_season,
-        "rounds": total_rounds,
-        "waiver_round": max(1, total_rounds - 2) if total_rounds else None,
+        "rounds": latest["rounds"],
+        "waiver_round": latest["waiver_round"],
         "updated": dt.datetime.now(dt.timezone.utc).strftime("%b %d, %Y at %H:%M UTC"),
-        "teams": sorted(teams.values(), key=lambda t: t["team"].lower()),
+        "teams": latest["teams"],
+        "boards": boards,
         "zero_year": zero_year,
         "zero_weeks": wk_data["weeks"],
         "zero_season": wk_data["offenses"],
@@ -189,6 +227,7 @@ def build_payload(league_id, current_league_id=None):
         "trades": trade_list,
         "trade_volume": trade_vol,
         "punish": load_punishments(wk_data["offenses"]),
+        "repo": load_config().get("repo", ""),
         "live": live,
         "last_week": wk_data["last_week"],
     }
@@ -391,6 +430,10 @@ PAGE = """<!DOCTYPE html>
   .gside.up .tm{font-weight:600}
   .gside.up .pt{color:var(--gold)}
   .gside.down .tm, .gside.down .pt{color:var(--muted)}
+  .yet{
+    font-size:11.5px; color:var(--gold); border:1px solid #6B551C;
+    border-radius:3px; padding:1px 5px; margin-left:5px; white-space:nowrap;
+  }
   .vs{border-top:1px solid var(--line); margin:4px 0}
 
   /* ---- zero chart ---- */
@@ -449,6 +492,27 @@ PAGE = """<!DOCTYPE html>
   .owed.head{color:var(--muted); font-size:12px; border-bottom:1px solid var(--line)}
   .owed.head span{text-align:center; font-family:'Barlow Condensed',sans-serif; font-size:13px}
   .owed.head span:first-child{text-align:left}
+
+  /* ---- log form ---- */
+  .logbtn{
+    font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:600;
+    background:var(--gold); color:#241A02; border:0; border-radius:5px;
+    padding:8px 15px; cursor:pointer; margin-top:14px;
+  }
+  .logbtn.ghost{background:transparent; color:var(--gold); border:1px solid #6B551C}
+  .form{background:var(--surface); border:1px solid var(--line); border-radius:6px;
+    padding:14px; margin-top:12px}
+  .form label{display:block; font-size:12.5px; color:var(--muted); margin:9px 0 3px}
+  .form input, .form select{
+    width:100%; background:var(--board); border:1px solid var(--line); color:var(--chalk);
+    border-radius:5px; padding:9px 10px; font:inherit; font-size:15px;
+  }
+  .form .two{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .form pre{
+    background:var(--board); border:1px solid var(--line); border-radius:5px;
+    padding:10px; margin:12px 0 0; font-size:12px; overflow-x:auto; color:var(--chalk);
+  }
+  .form .acts{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
 
   /* ---- awards ---- */
   .awards{display:grid; grid-template-columns:repeat(auto-fit,minmax(232px,1fr)); gap:10px; margin-top:16px}
@@ -542,7 +606,8 @@ PAGE = """<!DOCTYPE html>
   </section>
 
   <section id="panelKeep" hidden>
-    <h2 class="panel-h">Keeper cost for __KEEPER_SEASON__</h2>
+    <h2 class="panel-h" id="keepHead">Keeper cost for __KEEPER_SEASON__</h2>
+    <div class="weekpick" id="seasonPick" style="margin:10px 0 2px"></div>
     <nav>
       <div class="rail" id="rail" role="tablist"></div>
     </nav>
@@ -635,7 +700,7 @@ function render(){
   board.innerHTML = '';
   let shown = 0;
 
-  DATA.teams.forEach(t => {
+  activeBoard.teams.forEach(t => {
     if (active !== 'ALL' && active !== t.manager) return;
     const players = t.players.filter(p =>
       !term || p.name.toLowerCase().includes(term) || p.pos.toLowerCase() === term);
@@ -654,6 +719,26 @@ function render(){
   count.textContent = shown + (shown === 1 ? ' player' : ' players');
 }
 
+let activeBoard = DATA.boards[0];
+
+function buildSeasonPick(){
+  const el = document.getElementById('seasonPick');
+  if (!DATA.boards || DATA.boards.length < 2){ el.style.display = 'none'; return; }
+  el.innerHTML = DATA.boards.map(b =>
+    `<button data-s="${b.season}" aria-selected="${b === activeBoard}">${b.keeper_season}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      activeBoard = DATA.boards.find(x => String(x.season) === b.dataset.s);
+      active = 'ALL';
+      document.getElementById('keepHead').textContent = `Keeper cost for ${activeBoard.keeper_season}`;
+      buildSeasonPick();
+      rail.innerHTML = '';
+      buildRail();
+      render();
+    };
+  });
+}
+
 function buildRail(){
   const mk = (label, key) => {
     const b = document.createElement('button');
@@ -670,10 +755,11 @@ function buildRail(){
     rail.appendChild(b);
   };
   mk('All teams','ALL');
-  DATA.teams.forEach(t => mk(t.team, t.manager));
+  activeBoard.teams.forEach(t => mk(t.team, t.manager));
 }
 
 q.addEventListener('input', render);
+buildSeasonPick();
 buildRail();
 render();
 
@@ -779,7 +865,68 @@ function renderLedger(){
     <div class="owed head"><span>Team</span><span>Earned</span><span>Served</span><span>Owed</span></div>
     ${rows}
     <h2 class="section-h">The log</h2>
-    <div class="ledger">${log}</div>`;
+    <div class="ledger">${log}</div>
+    <button class="logbtn" id="logOpen">Log a punishment</button>
+    <div id="logForm"></div>`;
+
+  document.getElementById('logOpen').onclick = showLogForm;
+}
+
+function showLogForm(){
+  const teams = (DATA.punish.tally || []).map(t =>
+    `<option value="${t.manager}">${t.team}</option>`).join('');
+  const wk = DATA.zero_weeks.length ? DATA.zero_weeks[DATA.zero_weeks.length-1].week : 1;
+  document.getElementById('logForm').innerHTML = `<div class="form">
+    <label>Who</label><select id="fTeam">${teams}</select>
+    <label>Punishment</label>
+    <input id="fWhat" placeholder="e.g. Waffle House hour" />
+    <div class="two">
+      <div><label>Week</label><input id="fWeek" type="number" value="${wk}" min="1" /></div>
+      <div><label>Clears how many</label><input id="fCount" type="number" value="1" min="1" /></div>
+    </div>
+    <div class="two">
+      <div><label>Status</label><select id="fStatus">
+        <option value="done">Served</option><option value="pending">Still owed</option>
+      </select></div>
+      <div><label>Date</label><input id="fDate" type="date" /></div>
+    </div>
+    <label>Note (optional)</label><input id="fNote" placeholder="" />
+    <pre id="fOut"></pre>
+    <div class="acts">
+      <button class="logbtn" id="fCopy">Copy entry</button>
+      ${DATA.repo ? `<a class="logbtn ghost" target="_blank" rel="noopener"
+        href="https://github.com/${DATA.repo}/edit/main/punishments.json">Open the file on GitHub</a>` : ''}
+    </div>
+    <p class="note">Copy the entry, tap through to GitHub, paste it at the top of
+      the <strong>log</strong> list (add a comma after it), and commit. The site
+      updates on the next build.</p>
+  </div>`;
+
+  const ids = ['fTeam','fWhat','fWeek','fCount','fStatus','fDate','fNote'];
+  const refresh = () => {
+    const v = id => document.getElementById(id).value;
+    const entry = {
+      manager: v('fTeam'), week: Number(v('fWeek')) || null,
+      punishment: v('fWhat'), status: v('fStatus'),
+      date: v('fDate'), count: Number(v('fCount')) || 1,
+    };
+    if (v('fNote')) entry.note = v('fNote');
+    document.getElementById('fOut').textContent = JSON.stringify(entry, null, 2);
+  };
+  ids.forEach(id => document.getElementById(id).addEventListener('input', refresh));
+  refresh();
+
+  document.getElementById('fCopy').onclick = async () => {
+    const txt = document.getElementById('fOut').textContent;
+    try { await navigator.clipboard.writeText(txt); }
+    catch (e) {
+      const r = document.createRange();
+      r.selectNode(document.getElementById('fOut'));
+      getSelection().removeAllRanges(); getSelection().addRange(r);
+    }
+    document.getElementById('fCopy').textContent = 'Copied';
+    setTimeout(() => { document.getElementById('fCopy').textContent = 'Copy entry'; }, 1500);
+  };
 }
 
 function renderZeros(){
@@ -928,13 +1075,17 @@ function renderHome(){
         <span class="tm">${g.a.team}</span><span class="pt">${g.a.pts}</span></div>
         <div class="vs"></div><div class="gside down"><span class="tm">bye</span></div></div>`;
       const aUp = g.margin > 0 ? ' up' : '', bDown = g.margin > 0 ? ' down' : '';
+      const left = s => s.yet ? `<span class="yet">${s.yet} to go</span>` : '';
       return `<div class="game">
-        <div class="gside${aUp}"><span class="tm">${g.a.team}</span><span class="pt">${g.a.pts}</span></div>
+        <div class="gside${aUp}"><span class="tm">${g.a.team} ${left(g.a)}</span><span class="pt">${g.a.pts}</span></div>
         <div class="vs"></div>
-        <div class="gside${bDown}"><span class="tm">${g.b.team}</span><span class="pt">${g.b.pts}</span></div>
+        <div class="gside${bDown}"><span class="tm">${g.b.team} ${left(g.b)}</span><span class="pt">${g.b.pts}</span></div>
       </div>`;
     }).join('');
-    const state = live.started ? 'in progress' : 'not started yet';
+    const totalLeft = live.games.reduce((n,g) => n + (g.a.yet||0) + (g.b ? (g.b.yet||0) : 0), 0);
+    const state = live.started
+      ? `in progress · ${totalLeft} starters yet to score`
+      : 'not started yet';
     parts.push(`<h2 class="section-h">Week ${live.week} matchups<span class="when">${state}</span></h2>
       <div class="games">${games}</div>`);
   } else if (!last){
