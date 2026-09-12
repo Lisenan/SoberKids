@@ -69,9 +69,24 @@ def current_matchups(league_id, league, meta):
         info = meta.get(e.get("roster_id"))
         if not info:
             continue
+        # "Yet to score" is the best proxy Sleeper gives for players left to
+        # play: the matchup feed has no game clock or kickoff time, so a
+        # starter on 0.00 is either still to play or has genuinely blanked.
+        # Before kickoff that's everyone; by Monday night it's the zeros.
+        starters = e.get("starters") or []
+        spoints = e.get("starters_points") or []
+        yet = 0
+        for i, pid in enumerate(starters):
+            if not pid or pid == "0":
+                continue
+            pts = spoints[i] if i < len(spoints) else None
+            if pts is None or pts == 0:
+                yet += 1
         pairs.setdefault(e.get("matchup_id"), []).append({
             "team": info["team"], "manager": info["manager"],
             "pts": round(e.get("points") or 0, 2),
+            "yet": yet,
+            "slots": len([p for p in starters if p and p != "0"]),
         })
 
     games = []

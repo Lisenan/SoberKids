@@ -1,11 +1,14 @@
 {
   "league_id": "1312035100451442688",
+  "repo": "lisenan/SoberKids",
 
   "_note": [
-    "One league id is enough. The build works out the rest: keeper prices come",
-    "from last season's draft (found via the league's previous_league_id), and",
-    "punishments, awards and trades come from the season being played.",
+    "league_id: one id is enough. The build finds last season's draft via",
+    "previous_league_id for keeper prices, and uses the season being played",
+    "for punishments, awards and trades. It also walks further back to offer",
+    "a keeper board for every past season.",
     "",
-    "Only set current_league_id if you want to override that automatic choice."
+    "repo: owner/name on GitHub. Used to build the 'edit punishments.json'",
+    "link on the Served tab. Leave blank to hide that button."
   ]
 }
