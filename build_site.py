@@ -606,6 +606,9 @@ PAGE = """<!DOCTYPE html>
   .grade.F{background:#5A3030; border-color:#5A3030; color:#FFD7D7}
   .paa{color:var(--muted); font-size:12.5px; margin-top:4px}
   .note{color:var(--muted); font-size:12.5px; margin:14px 0 0}
+  .note.prov{
+    color:var(--gold); border-left:2px solid #6B551C; padding-left:10px;
+  }
 
   footer{
     margin-top:44px; padding-top:18px; border-top:1px solid var(--line);
@@ -839,7 +842,12 @@ function renderSeason(){
   const ticks = [];
   for (let i = 0; i <= max; i += Math.max(1, Math.ceil(max / 6))) ticks.push(`<span>${i}</span>`);
 
-  zeroBody.innerHTML = `<div class="zchart">${rows}
+  const prov = (DATA.zero_weeks || []).find(w => w.provisional);
+  const provNote = prov
+    ? `<p class="note prov">Includes week ${prov.week}, still in progress — those
+       totals can drop once the late games finish.</p>` : '';
+
+  zeroBody.innerHTML = `${provNote}<div class="zchart">${rows}
     <div class="zscale"><div></div><div>${ticks.join('')}</div><div></div></div>
     <div class="zkey">
       <span><i style="background:#C2564F"></i>zeros</span>
@@ -854,8 +862,13 @@ function renderWeeks(){
     return;
   }
   const picker = DATA.zero_weeks.map(w =>
-    `<button data-wk="${w.week}" aria-selected="${w.week === activeWeek}">Wk ${w.week}</button>`).join('');
+    `<button data-wk="${w.week}" aria-selected="${w.week === activeWeek}">Wk ${w.week}${w.provisional ? ' ·' : ''}</button>`).join('');
   const wk = DATA.zero_weeks.find(w => w.week === activeWeek) || DATA.zero_weeks[0];
+
+  const live = wk.provisional
+    ? `<p class="note prov">Week ${wk.week} is still being played — these are not
+       final. A starter whose game has not kicked off yet also shows 0.00, so
+       wait for Tuesday before anyone pays up.</p>` : '';
 
   let body;
   if (!wk.teams.length){
@@ -877,7 +890,7 @@ function renderWeeks(){
     }).join('');
   }
 
-  zeroBody.innerHTML = `<div class="weekpick">${picker}</div>${body}`;
+  zeroBody.innerHTML = `<div class="weekpick">${picker}</div>${live}${body}`;
   zeroBody.querySelectorAll('.weekpick button').forEach(b => {
     b.onclick = () => { activeWeek = Number(b.dataset.wk); renderWeeks(); };
   });
@@ -909,6 +922,8 @@ function renderLedger(){
 
   zeroBody.innerHTML = `
     ${p.rule ? `<p class="note" style="margin-top:14px">${p.rule}</p>` : ''}
+    ${(DATA.zero_weeks || []).some(w => w.provisional)
+      ? `<p class="note prov">Earned counts include a week still in progress.</p>` : ''}
     <div class="owed head"><span>Team</span><span>Earned</span><span>Served</span><span>Owed</span></div>
     ${rows}
     <h2 class="section-h">The log</h2>

@@ -141,6 +141,21 @@ def current_matchups(league_id, league, meta):
     return {"week": wk, "games": games, "started": started}
 
 
+def _in_progress_week(league, done):
+    """The week currently being played, if any, and if it has scores on it."""
+    state = get(f"{BASE}/state/nfl") or {}
+    if str(league.get("season")) != str(state.get("season")):
+        return None
+    if (state.get("season_type") or "regular") == "pre":
+        return None
+    wk = state.get("week")
+    settings = league.get("settings") or {}
+    last_regular = max(1, (settings.get("playoff_week_start") or 15) - 1)
+    if not wk or wk in done or wk > last_regular:
+        return None
+    return wk
+
+
 def _roster_meta(league_id):
     managers = core.get_managers(league_id)
     out = {}
@@ -175,7 +190,16 @@ def collect(league_id, league, players):
     off = {}      # manager -> offense tallies
     sc = {}       # manager -> scoring tallies
 
-    for wk in played_weeks(league):
+    # Completed weeks, plus the one in progress. Sleeper does not advance
+    # /state/nfl until Tuesday, so without this Sunday's zeros stay invisible
+    # for two days -- exactly when the league wants to see them.
+    done = played_weeks(league)
+    scan = [(w, False) for w in done]
+    live_wk = _in_progress_week(league, done)
+    if live_wk:
+        scan.append((live_wk, True))
+
+    for wk, provisional in scan:
         matchups = get(f"{BASE}/league/{league_id}/matchups/{wk}") or []
         if not matchups:
             continue
@@ -184,6 +208,7 @@ def collect(league_id, league, players):
             continue
 
         week_teams = []
+        week_yet = 0
         scores = []           # (points, manager, team) for ranking
         top_player = None     # best STARTED player in the league this week
         bench_regret = None   # best player left on a bench
@@ -245,6 +270,9 @@ def collect(league_id, league, players):
                         "pts": round(pts, 2),
                         "team": info["team"], "manager": info["manager"],
                     }
+
+            if provisional:
+                week_yet += len(zeros)
 
             offenses = len(zeros) + len(negatives) + empties
             if offenses:
@@ -319,6 +347,8 @@ def collect(league_id, league, players):
         week_teams.sort(key=lambda t: (-t["total"], t["team"].lower()))
         weeks_out.append({
             "week": wk,
+            "provisional": provisional,
+            "yet": week_yet,
             "teams": week_teams,
             "awards": {
                 "high": {"team": ranked[0][2], "pts": round(ranked[0][0], 2)},
