@@ -25,6 +25,7 @@ from pathlib import Path
 import sleeper_keeper_report as core
 import weekly as weekly_mod
 import trades as trades_mod
+import scorecard as scorecard_mod
 
 OUT_DIR = Path("docs")
 CONFIG = Path("league.json")
@@ -197,6 +198,9 @@ def build_payload(league_id, current_league_id=None):
     zero_year = None
     trade_list, trade_vol = [], []
     live = None
+    table = []
+    cards = []
+    ranks = []
     zl_id = current_league_id or league_id
     zleague = league if zl_id == league_id else core.get(f"{core.BASE}/league/{zl_id}")
     if zleague:
@@ -205,6 +209,10 @@ def build_payload(league_id, current_league_id=None):
             wk_data = weekly_mod.collect(zl_id, zleague, allp)
             zero_year = zleague.get("season")
             live = weekly_mod.current_matchups(zl_id, zleague, wk_data["meta"])
+            ranks = weekly_mod.standings(zl_id)
+            cards, table = scorecard_mod.build(
+                zl_id, allp, wk_data["player_weeks"],
+                len(wk_data["weeks"]) or 1)
             trade_list, trade_vol = trades_mod.build(
                 zl_id, zleague, allp, wk_data["player_weeks"], wk_data["meta"],
                 weekly_mod.played_weeks(zleague), wk_data["last_week"])
@@ -229,6 +237,9 @@ def build_payload(league_id, current_league_id=None):
         "punish": load_punishments(wk_data["offenses"]),
         "repo": load_config().get("repo", ""),
         "live": live,
+        "standings": ranks,
+        "scorecard": cards,
+        "round_table": table,
         "last_week": wk_data["last_week"],
     }
 
@@ -493,6 +504,30 @@ PAGE = """<!DOCTYPE html>
   .owed.head span{text-align:center; font-family:'Barlow Condensed',sans-serif; font-size:13px}
   .owed.head span:first-child{text-align:left}
 
+  /* ---- standings ---- */
+  .stand{display:grid; grid-template-columns:26px 1fr 62px 62px; gap:8px;
+    align-items:center; padding:9px 2px; border-bottom:1px solid var(--line)}
+  .stand.head{color:var(--muted); font-size:12px; border-bottom:1px solid var(--line)}
+  .stand.head span:nth-child(n+3){text-align:right}
+  .stand .rk{color:var(--muted); font-family:'Barlow Condensed',sans-serif;
+    font-size:17px; font-weight:700; text-align:center}
+  .stand .rec{font-family:'Barlow Condensed',sans-serif; font-size:19px;
+    font-weight:700; text-align:right}
+  .stand .pf{text-align:right; color:var(--muted); font-size:13.5px}
+  .stand.playoff .rk{color:var(--gold)}
+  .cutline{border-top:2px dashed #3A4A63; margin:2px 0; padding-top:2px;
+    color:var(--muted); font-size:11.5px}
+
+  /* ---- scorecard ---- */
+  .kcard{display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center;
+    padding:10px 2px; border-bottom:1px solid var(--line)}
+  .kcard .meta{margin-top:2px}
+  .vb{font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:600;
+    border-radius:4px; padding:3px 9px; white-space:nowrap}
+  .vb.Steal{background:#1E3D2F; color:#7EE0AE; border:1px solid #2E5C46}
+  .vb.Fair{color:var(--muted); border:1px solid var(--line)}
+  .vb.Bust{background:#4A2626; color:#F1A9A9; border:1px solid #5A3030}
+
   /* ---- log form ---- */
   .logbtn{
     font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:600;
@@ -596,6 +631,7 @@ PAGE = """<!DOCTYPE html>
   <div class="views" role="tablist">
     <button id="vZero" role="tab" aria-selected="true">Punishments</button>
     <button id="vHome" role="tab" aria-selected="false">This week</button>
+    <button id="vStand" role="tab" aria-selected="false">Standings</button>
     <button id="vAward" role="tab" aria-selected="false">Awards</button>
     <button id="vTrade" role="tab" aria-selected="false">Trades</button>
     <button id="vKeep" role="tab" aria-selected="false">Keepers</button>
@@ -605,7 +641,16 @@ PAGE = """<!DOCTYPE html>
     <div id="homeBody"></div>
   </section>
 
+  <section id="panelStand" hidden>
+    <div id="standBody"></div>
+  </section>
+
   <section id="panelKeep" hidden>
+    <div class="views" role="tablist" style="border-bottom:0; margin-top:14px">
+      <button id="kCost" role="tab" aria-selected="true" style="font-size:17px">Costs</button>
+      <button id="kCard" role="tab" aria-selected="false" style="font-size:17px">Scorecard</button>
+    </div>
+    <div id="keepCost">
     <h2 class="panel-h" id="keepHead">Keeper cost for __KEEPER_SEASON__</h2>
     <div class="weekpick" id="seasonPick" style="margin:10px 0 2px"></div>
     <nav>
@@ -618,6 +663,8 @@ PAGE = """<!DOCTYPE html>
     </div>
 
     <main id="board"></main>
+    </div>
+    <div id="keepCard" hidden></div>
   </section>
 
   <section id="panelZero">
@@ -1095,6 +1142,82 @@ function renderHome(){
   homeBody.innerHTML = parts.join('');
 }
 
+
+/* ---------- standings ---------- */
+const standBody = document.getElementById('standBody');
+
+function renderStandings(){
+  const rows = DATA.standings || [];
+  if (!rows.length){
+    standBody.innerHTML = '<p class="clean">No games played yet.</p>';
+    return;
+  }
+  const half = Math.ceil(rows.length / 2);
+  const body = rows.map((t, i) => {
+    const cut = (i === half) ? '<div class="cutline">playoff line (top half)</div>' : '';
+    return cut + `<div class="stand${i < half ? ' playoff' : ''}">
+      <span class="rk">${t.rank}</span>
+      <span><strong>${t.team}</strong><div class="meta">${t.manager}</div></span>
+      <span class="rec">${t.record}</span>
+      <span class="pf">${t.pf}<div style="font-size:11.5px">${t.diff > 0 ? '+' : ''}${t.diff}</div></span>
+    </div>`;
+  }).join('');
+  standBody.innerHTML = `<h2 class="section-h">Standings</h2>
+    <div class="stand head"><span></span><span>Team</span><span>W-L</span><span>PF / diff</span></div>
+    ${body}
+    <p class="note">Sorted by win percentage, then points for. The dashed line
+      marks the top half, not your actual playoff format.</p>`;
+}
+
+/* ---------- keeper scorecard ---------- */
+function renderScorecard(){
+  const cards = DATA.scorecard || [];
+  const el = document.getElementById('keepCard');
+  if (!cards.length){
+    el.innerHTML = `<p class="clean">No keepers found for this season yet — this
+      fills in once the season's draft has keepers flagged and games are played.</p>`;
+    return;
+  }
+  const steals = cards.filter(c => c.verdict === 'Steal').length;
+  const busts = cards.filter(c => c.verdict === 'Bust').length;
+
+  const rows = cards.map(c => `<div class="kcard">
+      <div>
+        <div class="nm"><strong>${c.name}</strong>
+          ${c.pos ? `<span class="pos ${c.pos}">${c.pos}</span>` : ''}</div>
+        <div class="meta">${c.team} · kept at R${c.round} ·
+          ${c.started} pts started${c.round_avg ? ` vs ${c.round_avg} for the round` : ''}
+          ${c.ratio ? ` · ${c.ratio}×` : ''}</div>
+      </div>
+      <span class="vb ${c.verdict}">${c.verdict}</span>
+    </div>`).join('');
+
+  el.innerHTML = `<h2 class="panel-h">Did the keepers earn it?</h2>
+    <p class="note" style="margin-top:6px">${cards.length} keepers this season —
+      ${steals} beating their round, ${busts} falling short.</p>
+    ${rows}
+    <p class="note">Each keeper is measured against what other players drafted in
+      the same round have produced, counting started points only. A keeper held at
+      round 3 took up a 3rd-round slot, so the fair question is whether he beat a
+      typical 3rd rounder.</p>`;
+}
+
+const vStand = document.getElementById('vStand');
+const pStand = document.getElementById('panelStand');
+const kCost = document.getElementById('kCost'), kCard = document.getElementById('kCard');
+
+kCost.onclick = () => {
+  kCost.setAttribute('aria-selected','true'); kCard.setAttribute('aria-selected','false');
+  document.getElementById('keepCost').hidden = false;
+  document.getElementById('keepCard').hidden = true;
+};
+kCard.onclick = () => {
+  kCard.setAttribute('aria-selected','true'); kCost.setAttribute('aria-selected','false');
+  document.getElementById('keepCost').hidden = true;
+  document.getElementById('keepCard').hidden = false;
+  renderScorecard();
+};
+
 /* ---------- trades ---------- */
 const tradeBody = document.getElementById('tradeBody');
 
@@ -1167,7 +1290,7 @@ const pHome = document.getElementById('panelHome');
 
 function showPanel(which){
   const map = {home:[vHome,pHome], keep:[vKeep,pKeep], zero:[vZero,pZero],
-               award:[vAward,pAward], trade:[vTrade,pTrade]};
+               award:[vAward,pAward], trade:[vTrade,pTrade], stand:[vStand,pStand]};
   Object.entries(map).forEach(([k,[btn,panel]]) => {
     const on = (k === which);
     btn.setAttribute('aria-selected', String(on));
@@ -1180,6 +1303,7 @@ vKeep.onclick = () => showPanel('keep');
 vZero.onclick = () => { showPanel('zero'); renderZeros(); };
 vAward.onclick = () => { showPanel('award'); renderAwards(); };
 vTrade.onclick = () => { showPanel('trade'); renderTrades(); };
+vStand.onclick = () => { showPanel('stand'); renderStandings(); };
 
 aWeek.onclick = () => {
   awardMode = 'week';

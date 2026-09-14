@@ -43,6 +43,45 @@ def played_weeks(league):
     return list(range(1, min(current, last_regular + 1)))
 
 
+def standings(league_id):
+    """
+    Records straight from the rosters endpoint.
+
+    Sleeper stores points as an integer part plus a separate decimal field
+    (fpts / fpts_decimal), so 1234 + 56 means 1234.56 -- they have to be
+    recombined or every total reads as a whole number.
+    """
+    managers = core.get_managers(league_id)
+    rows = []
+    for r in core.get_rosters(league_id) or []:
+        m = managers.get(r.get("owner_id"), {})
+        st = r.get("settings") or {}
+
+        def pts(whole, dec):
+            return round((st.get(whole) or 0) + (st.get(dec) or 0) / 100, 2)
+
+        w = st.get("wins") or 0
+        l = st.get("losses") or 0
+        t = st.get("ties") or 0
+        played = w + l + t
+        rows.append({
+            "team": m.get("team") or m.get("manager") or f"Roster {r.get('roster_id')}",
+            "manager": m.get("manager") or "",
+            "wins": w, "losses": l, "ties": t,
+            "record": f"{w}-{l}" + (f"-{t}" if t else ""),
+            "pct": round((w + t * 0.5) / played, 3) if played else 0,
+            "pf": pts("fpts", "fpts_decimal"),
+            "pa": pts("fpts_against", "fpts_against_decimal"),
+            "streak": st.get("streak") or "",
+        })
+    # Standard tiebreak: record first, then points for.
+    rows.sort(key=lambda r: (-r["pct"], -r["wins"], -r["pf"]))
+    for i, r in enumerate(rows, 1):
+        r["rank"] = i
+        r["diff"] = round(r["pf"] - r["pa"], 2)
+    return rows
+
+
 def current_matchups(league_id, league, meta):
     """
     This week's games, whether or not they're finished.
