@@ -1,7 +1,15 @@
 {
   "rule": "Every zero, negative, or empty slot is one punishment. Serve it or it carries.",
 
-  "log": [],
+  "log": [{
+  "manager": "TableDivers",
+  "week": 1,
+  "punishment": "Beer Shotgun",
+  "status": "done",
+  "date": "2026-09-17",
+  "count": 1,
+  "note": "Go Bills!"
+},],
 
   "_howto": [
     "Add entries to the log list above. Each one looks like this:",
