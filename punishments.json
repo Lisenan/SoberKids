@@ -1,15 +1,17 @@
 {
   "rule": "Every zero, negative, or empty slot is one punishment. Serve it or it carries.",
 
-  "log": [{
-  "manager": "TableDivers",
-  "week": 1,
-  "punishment": "Beer Shotgun",
-  "status": "done",
-  "date": "2026-09-17",
-  "count": 1,
-  "note": "Go Bills!"
-},],
+  "log": [
+    {
+      "manager": "TableDivers",
+      "week": 1,
+      "punishment": "Beer Shotgun",
+      "status": "done",
+      "date": "2026-09-17",
+      "count": 1,
+      "note": "Go Bills!"
+    }
+  ],
 
   "_howto": [
     "Add entries to the log list above. Each one looks like this:",
@@ -31,8 +33,8 @@
     "count:      how many offenses this settles. Defaults to 1.",
     "proof:      optional link to a photo or video",
     "",
-    "Commas go BETWEEN entries, never after the last one -- that is the one",
-    "thing that breaks the file. If the JSON is invalid the build still runs,",
-    "it just skips the ledger and prints a warning in the Actions log."
+    "Commas go BETWEEN entries, never after the last one. The build now",
+    "repairs a stray trailing comma on its own and says so on the site, so a",
+    "logged punishment will not silently vanish again."
   ]
 }

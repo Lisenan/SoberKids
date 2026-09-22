@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,12 +43,32 @@ def load_punishments(offenses):
     team name.
     """
     if not PUNISH.exists():
-        return {"rule": "", "log": [], "tally": []}
+        return {"rule": "", "log": [], "tally": [], "problem": ""}
+
+    raw = PUNISH.read_text()
+    problem = ""
     try:
-        cfg = json.loads(PUNISH.read_text())
-    except json.JSONDecodeError as e:
-        print(f"  (punishments.json ignored -- invalid JSON: {e})", file=sys.stderr)
-        return {"rule": "", "log": [], "tally": []}
+        cfg = json.loads(raw)
+    except json.JSONDecodeError as first:
+        # A trailing comma before a closing bracket is the mistake people
+        # actually make editing this on a phone, and it used to take the whole
+        # ledger down silently -- which looks exactly like the entry was
+        # deleted. Try repairing that one thing before giving up.
+        repaired = re.sub(r",(\s*[}\]])", r"\1", raw)
+        try:
+            cfg = json.loads(repaired)
+            print("  punishments.json had a stray trailing comma -- repaired "
+                  "for this build. Tidy the file when you get a chance.",
+                  file=sys.stderr)
+        except json.JSONDecodeError:
+            print(f"  punishments.json could not be read: {first}", file=sys.stderr)
+            # Only the served counts come from this file. Earned and owed come
+            # from Sleeper, so keep building those rather than blanking the tab.
+            cfg = {}
+            problem = (f"punishments.json has a formatting error "
+                       f"({first.msg}, line {first.lineno}), so served counts "
+                       f"are missing below. Nothing was lost -- fix the file "
+                       f"and they come straight back.")
 
     by_mgr = {o["manager"].lower(): o for o in offenses}
     by_team = {o["team"].lower(): o for o in offenses}
@@ -83,7 +104,8 @@ def load_punishments(offenses):
             "outstanding": max(0, o["total"] - f),
         })
     tally.sort(key=lambda t: (-t["outstanding"], -t["incurred"]))
-    return {"rule": cfg.get("rule") or "", "log": entries, "tally": tally}
+    return {"rule": cfg.get("rule") or "", "log": entries,
+            "tally": tally, "problem": problem}
 
 
 def load_config():
@@ -898,8 +920,11 @@ function renderWeeks(){
 
 function renderLedger(){
   const p = DATA.punish || {tally:[], log:[]};
+  const problem = p.problem
+    ? `<p class="note prov">${p.problem}</p>` : '';
   if (!p.tally.length){
-    zeroBody.innerHTML = '<p class="clean">No completed weeks yet this season.</p>';
+    zeroBody.innerHTML = problem ||
+      '<p class="clean">No completed weeks yet this season.</p>';
     return;
   }
   const rows = p.tally.map(t => `<div class="owed">
@@ -921,6 +946,7 @@ function renderLedger(){
     : '<p class="clean">Nothing logged yet. Add entries to punishments.json.</p>';
 
   zeroBody.innerHTML = `
+    ${problem}
     ${p.rule ? `<p class="note" style="margin-top:14px">${p.rule}</p>` : ''}
     ${(DATA.zero_weeks || []).some(w => w.provisional)
       ? `<p class="note prov">Earned counts include a week still in progress.</p>` : ''}
@@ -959,9 +985,9 @@ function showLogForm(){
       ${DATA.repo ? `<a class="logbtn ghost" target="_blank" rel="noopener"
         href="https://github.com/${DATA.repo}/edit/main/punishments.json">Open the file on GitHub</a>` : ''}
     </div>
-    <p class="note">Copy the entry, tap through to GitHub, paste it at the top of
-      the <strong>log</strong> list (add a comma after it), and commit. The site
-      updates on the next build.</p>
+    <p class="note">Copy the entry, tap through to GitHub, and paste it
+      immediately after <code>&quot;log&quot;: [</code> &mdash; the comma is
+      already handled. Commit, and it shows up on the next build.</p>
   </div>`;
 
   const ids = ['fTeam','fWhat','fWeek','fCount','fStatus','fDate','fNote'];
@@ -973,7 +999,13 @@ function showLogForm(){
       date: v('fDate'), count: Number(v('fCount')) || 1,
     };
     if (v('fNote')) entry.note = v('fNote');
-    document.getElementById('fOut').textContent = JSON.stringify(entry, null, 2);
+    // If the log already has entries, this one goes in FIRST and needs a
+    // comma after it. If the log is empty it must not have one. Getting that
+    // wrong is the only way to break the file, so do it here rather than
+    // leaving it to whoever is pasting on a phone.
+    const tail = (DATA.punish.log || []).length ? ',' : '';
+    document.getElementById('fOut').textContent =
+      JSON.stringify(entry, null, 2) + tail;
   };
   ids.forEach(id => document.getElementById(id).addEventListener('input', refresh));
   refresh();
