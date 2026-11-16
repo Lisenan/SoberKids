@@ -24,7 +24,15 @@
   "status": "done",
   "date": "",
   "count": 1
-    },
+    },{
+  "manager": "Lisenan",
+  "week": 10,
+  "punishment": "Chug a Beer",
+  "status": "done",
+  "date": "2026-11-15",
+  "count": 1,
+  "note": "Go Bills!"
+},
   ],
 
   "_howto": [
